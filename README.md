@@ -37,7 +37,7 @@ PORT=3000
 
 - *4.-Crea una base de datos y tabla*
 
-*** Ejecuta en MySQL:***
+*Ejecuta en MySQL:*
 
 ```sql
 
