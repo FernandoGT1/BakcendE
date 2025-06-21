@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middlewares
 app.use(cors());
-app.use(express.json()); // Para parsear JSON
+app.use(express.json());
 
 // Rutas
 app.use("/api", contactRoutes);
