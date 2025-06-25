@@ -64,7 +64,7 @@ node app.js
 ## 📚 Endpoints
 ### POST /api/contacto
 
--*Envía datos de contacto para almacenar en MySQL, Ejemplo:*
+- *Envía datos de contacto para almacenar en MySQL, Ejemplo:*
 
 ```json
 {
