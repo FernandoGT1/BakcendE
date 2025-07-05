@@ -91,7 +91,7 @@ const saveContact = async (req, res) => {
 
     // Guardar en MySQL usando connection pool
    const [result] = await pool.execute(
-  "INSERT INTO contactos (nombre, correo, telefono, mensaje) VALUES (?, ?, ?, ?)",
+  "INSERT INTO 22393139f1_contactos (nombre, correo, telefono, mensaje) VALUES (?, ?, ?, ?)",
   [nombre, correo, telefono, mensaje]
 );
 
