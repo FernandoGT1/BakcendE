@@ -8,7 +8,7 @@ exports.registerUser = async (req, res) => {
   const { username, email, password } = req.body;
 
   try {
-    // Validar si existe
+    // Validar si existe el username o email
     const [existing] = await pool.execute(
       'SELECT * FROM 22393139f2_users WHERE email = ? OR username = ?',
       [email, username]
@@ -32,25 +32,25 @@ exports.registerUser = async (req, res) => {
   }
 };
 
-// Login
+// Login con username
 exports.loginUser = async (req, res) => {
-  const { email, password } = req.body;
+  const { username, password } = req.body;
 
   try {
     const [rows] = await pool.execute(
-      'SELECT * FROM 22393139f2_users WHERE email = ?',
-      [email]
+      'SELECT * FROM 22393139f2_users WHERE username = ?',
+      [username]
     );
 
     if (rows.length === 0) {
-      return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
 
     const user = rows[0];
     const passwordMatch = await bcrypt.compare(password, user.password);
 
     if (!passwordMatch) {
-      return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
 
     const token = jwt.sign(
@@ -59,7 +59,14 @@ exports.loginUser = async (req, res) => {
       { expiresIn: '3h' }
     );
 
-    res.json({ token });
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role
+      }
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error al iniciar sesión' });
