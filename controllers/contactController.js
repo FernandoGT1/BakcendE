@@ -1,8 +1,9 @@
 const axios = require('axios');
-const mysql = require('mysql2/promise'); // Usaremos la versión promise-based
+const mysql = require('mysql2/promise');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
 
-// Configuración de la conexión MySQL
+// Conexión a la BD
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -14,7 +15,7 @@ const pool = mysql.createPool({
   queueLimit: 0
 });
 
-// Función para sanitizar inputs
+// Sanitizar inputs
 const sanitizeInput = (input) => {
   if (!input) return input;
   return input.toString()
@@ -26,81 +27,70 @@ const sanitizeInput = (input) => {
     .replace(/\|/g, '&#124;');
 };
 
+// Guardar contacto (POST)
 const saveContact = async (req, res) => {
-  // Sanitizar y validar inputs
   const nombre = sanitizeInput(req.body.nombre);
   const correo = sanitizeInput(req.body.correo);
   const telefono = sanitizeInput(req.body.telefono);
   const mensaje = sanitizeInput(req.body.mensaje);
   const token = req.body['g-recaptcha-response'];
 
-  // Validaciones básicas
-  if (!token) {
-    return res.status(400).json({ 
-      error: "Validación requerida",
-      message: "Por favor completa el reCAPTCHA" 
-    });
-  }
-
-  if (!nombre || !correo || !telefono || !mensaje) {
-    return res.status(400).json({ 
-      error: "Datos incompletos",
-      message: "Todos los campos son requeridos" 
-    });
-  }
+  if (!token) return res.status(400).json({ error: "Validación requerida", message: "Por favor completa el reCAPTCHA" });
+  if (!nombre || !correo || !telefono || !mensaje)
+    return res.status(400).json({ error: "Datos incompletos", message: "Todos los campos son requeridos" });
 
   try {
-    // Validar reCAPTCHA con Google
     const recaptchaResponse = await axios.post(
       'https://www.google.com/recaptcha/api/siteverify',
       new URLSearchParams({
         secret: process.env.RECAPTCHA_SECRET_KEY,
         response: token,
-        remoteip: req.ip // Opcional: validar IP del cliente
+        remoteip: req.ip
       }),
-      { 
-        headers: { 
-          'Content-Type': 'application/x-www-form-urlencoded' 
-        },
-        timeout: 5000 // Timeout de 5 segundos
-      }
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 5000 }
     );
 
     if (!recaptchaResponse.data.success) {
-      console.warn('Intento fallido de reCAPTCHA:', {
-        errors: recaptchaResponse.data['error-codes'],
-        ip: req.ip
-      });
-      
-      return res.status(400).json({ 
-        error: "Validación fallida",
-        message: "Por favor verifica que no eres un robot",
-        code: "INVALID_RECAPTCHA"
-      });
+      return res.status(400).json({ error: "Validación fallida", message: "No pudimos verificar que eres humano" });
     }
 
-    // Validación adicional del score (opcional para v3)
-    if (recaptchaResponse.data.score < 0.5) { // Si estás usando v3
-      console.warn('Score bajo de reCAPTCHA:', recaptchaResponse.data.score);
-      return res.status(400).json({ 
-        error: "Actividad sospechosa",
-        message: "No pudimos verificar tu identidad",
-        code: "LOW_RECAPTCHA_SCORE"
-      });
+    if (recaptchaResponse.data.score !== undefined && recaptchaResponse.data.score < 0.5) {
+      return res.status(400).json({ error: "Actividad sospechosa", message: "Score bajo de reCAPTCHA" });
     }
 
-    // Guardar en MySQL usando connection pool
-   const [result] = await pool.execute(
-  "INSERT INTO 22393139f1_contactos (nombre, correo, telefono, mensaje) VALUES (?, ?, ?, ?)",
-  [nombre, correo, telefono, mensaje]
-);
+    const [result] = await pool.execute(
+      "INSERT INTO 22393139f1_contactos (nombre, correo, telefono, mensaje) VALUES (?, ?, ?, ?)",
+      [nombre, correo, telefono, mensaje]
+    );
 
-    // Log exitoso
-    console.log(`Nuevo contacto guardado ID: ${result.insertId}`);
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASS
+      }
+    });
 
-    return res.status(201).json({ 
+    const mailOptions = {
+      from: process.env.GMAIL_USER,
+      to: process.env.GMAIL_USER,
+      subject: '📬 Nuevo contacto desde la landing',
+      text: `
+        ¡Nuevo contacto recibido!
+
+        Nombre: ${nombre}
+        Correo: ${correo}
+        Teléfono: ${telefono}
+        Mensaje: ${mensaje}
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ Contacto guardado y correo enviado. ID: ${result.insertId}`);
+
+    return res.status(201).json({
       success: true,
-      message: "Contacto guardado exitosamente",
+      message: "Contacto guardado y correo enviado",
       data: {
         id: result.insertId,
         timestamp: new Date().toISOString()
@@ -108,29 +98,67 @@ const saveContact = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error en el servidor:", {
-      error: error.message,
-      stack: error.stack,
-      body: req.body
-    });
-
-    // Manejo específico de errores de MySQL
-    if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({
-        error: "Entrada duplicada",
-        message: "Este contacto ya existe en nuestro sistema"
-      });
-    }
-
-    return res.status(500).json({ 
-      error: "Error en el servidor",
-      message: "Ocurrió un error al procesar tu solicitud",
-      code: "SERVER_ERROR"
-    });
+    console.error("❌ Error al guardar contacto:", error);
+    return res.status(500).json({ error: "Error en el servidor", message: error.message });
   }
 };
 
-module.exports = { 
+// Obtener todos los contactos (GET)
+const getContacts = async (req, res) => {
+  try {
+    const [rows] = await pool.execute("SELECT * FROM 22393139f1_contactos ORDER BY fecha_creacion DESC");
+    res.status(200).json(rows);
+  } catch (error) {
+    res.status(500).json({ error: "Error al obtener los contactos" });
+  }
+};
+
+// Obtener contacto por ID (GET)
+const getContactById = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [rows] = await pool.execute("SELECT * FROM 22393139f1_contactos WHERE id = ?", [id]);
+    if (rows.length === 0) return res.status(404).json({ error: "Contacto no encontrado" });
+    res.status(200).json(rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: "Error al obtener el contacto" });
+  }
+};
+
+// Actualizar contacto (PUT)
+const updateContact = async (req, res) => {
+  const { id } = req.params;
+  const { nombre, correo, telefono, mensaje } = req.body;
+  try {
+    const [result] = await pool.execute(
+      "UPDATE 22393139f1_contactos SET nombre = ?, correo = ?, telefono = ?, mensaje = ? WHERE id = ?",
+      [nombre, correo, telefono, mensaje, id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ error: "Contacto no encontrado" });
+    res.status(200).json({ message: "Contacto actualizado correctamente" });
+  } catch (error) {
+    res.status(500).json({ error: "Error al actualizar contacto" });
+  }
+};
+
+// Eliminar contacto (DELETE)
+const deleteContact = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [result] = await pool.execute("DELETE FROM 22393139f1_contactos WHERE id = ?", [id]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: "Contacto no encontrado" });
+    res.status(200).json({ message: "Contacto eliminado correctamente" });
+  } catch (error) {
+    res.status(500).json({ error: "Error al eliminar contacto" });
+  }
+};
+
+// Exportar
+module.exports = {
   saveContact,
-  sanitizeInput // Exportamos para testing
+  getContacts,
+  getContactById,
+  updateContact,
+  deleteContact,
+  sanitizeInput
 };
