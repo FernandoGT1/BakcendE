@@ -83,6 +83,17 @@ CREATE TABLE 22393139f1_contactos (
   fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+
+
+-- Cambiar el rol del usuario FernandoGT2 a 'admin'
+UPDATE 22393139f2_users
+SET role = 'admin'
+WHERE username = 'FernandoGT2';
+
+
+
+
+
 -- Consultar datos (vacía por ahora)
 SELECT * FROM 22393139f1_contactos;
 SELECT * FROM 22393139f2_users;
